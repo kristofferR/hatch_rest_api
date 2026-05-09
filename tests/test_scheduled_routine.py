@@ -494,6 +494,7 @@ class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
                 "macAddress": "AA:BB:CC",
                 "startTime": "2026-05-08T07:30:00",
                 "endTime": "2026-05-08T08:00:00",
+                "daysOfWeek": 127,
             }
         ])
         _, edit_url, _, edit_body = session.calls[0]
@@ -504,6 +505,7 @@ class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(edit_body["mrds"][0]["enabled"], False)
         self.assertEqual(edit_body["mrds"][0]["startTime"], "2026-05-08T07:30:00")
         self.assertEqual(edit_body["mrds"][0]["endTime"], "2026-05-08T08:00:00")
+        self.assertEqual(edit_body["mrds"][0]["daysOfWeek"], 127)
 
         _, confirm_url, _, confirm_body = session.calls[1]
         self.assertTrue(confirm_url.endswith("/service/app/v2/dataVersion"))
@@ -547,6 +549,7 @@ class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
                 "macAddress": "AA:BB:CC",
                 "startTime": "2026-05-08T07:45:00",
                 "endTime": "2026-05-08T08:15:00",
+                "daysOfWeek": 127,
             }
         ])
         _, edit_url, _, edit_body = session.calls[0]
@@ -556,6 +559,7 @@ class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(edit_body["mrds"][0]["enabled"], False)
         self.assertEqual(edit_body["mrds"][0]["startTime"], "2026-05-08T07:45:00")
         self.assertEqual(edit_body["mrds"][0]["endTime"], "2026-05-08T08:15:00")
+        self.assertEqual(edit_body["mrds"][0]["daysOfWeek"], 127)
 
     async def test_alarm_weekdays_update_uses_edit_multiple_and_confirms_data_version(self):
         session = FakeSession()

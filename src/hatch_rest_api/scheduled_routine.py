@@ -77,6 +77,7 @@ def alarm_update_payload(
         "displayOrder": alarm.get("displayOrder"),
         "startTime": start_time,
         "endTime": end_time,
+        "daysOfWeek": alarm.get("daysOfWeek"),
     }
 
 
@@ -119,6 +120,7 @@ def alarm_wake_time_update_payload(
             if end_time is not None
             else None
         ),
+        "daysOfWeek": alarm.get("daysOfWeek"),
     }
 
 
@@ -314,7 +316,7 @@ def _next_datetime_for_time(
     return next_time
 
 
-def _parse_local_datetime(value: str) -> datetime | None:
+def _parse_local_datetime(value: str | None) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:

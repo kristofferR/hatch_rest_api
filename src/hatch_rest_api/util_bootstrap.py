@@ -120,6 +120,10 @@ async def get_rest_devices(
             routines = []
         if mac_address in alarms_map:
             alarms = alarms_map[mac_address]
+            if alarms is None:
+                _LOGGER.warning(
+                    f"Iot device {iot_device} alarms unavailable; will load on demand"
+                )
         else:
             _LOGGER.debug(f"Iot device {iot_device} has no alarms")
             alarms = []
