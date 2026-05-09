@@ -30,7 +30,7 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
     current_playing: str = "none"
     current_id: int = 0
     current_step: int = 0
-    paused: bool = False
+    is_paused: bool = False
     color_id: int = NO_COLOR_ID
     sound_id: int = NO_SOUND_ID
     red: int = 0
@@ -56,7 +56,7 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
         if safely_get_json_value(state, "current.step") is not None:
             self.current_step = safely_get_json_value(state, "current.step")
         if safely_get_json_value(state, "current.paused") is not None:
-            self.paused = safely_get_json_value(state, "current.paused", bool)
+            self.is_paused = safely_get_json_value(state, "current.paused", bool)
         if safely_get_json_value(state, "connected") is not None:
             self.is_online = safely_get_json_value(state, "connected", bool)
         if safely_get_json_value(state, "snooze.active") is not None:
@@ -111,7 +111,7 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
             "current_playing": self.current_playing,
             "current_id": self.current_id,
             "current_step": self.current_step,
-            "paused": self.paused,
+            "is_paused": self.is_paused,
             "is_snoozed": self.is_snoozed,
             "snooze_start_time": self.snooze_start_time,
             "snooze_duration_seconds": self.snooze_duration_seconds,
@@ -232,7 +232,7 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
         if self.current_playing != "routine":
             _LOGGER.debug("advance_step ignored, no routine playing")
             return
-        if self.paused:
+        if self.is_paused:
             _LOGGER.debug("advance_step ignored, routine is paused")
             return
         steps_count = self.routine_step_count
@@ -260,8 +260,6 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
         if active_index is None:
             active_index = 0
         next_index = (active_index + 1) % len(swappables)
-        if active_index == next_index:
-            return
         active_routine = swappables[active_index]
         next_routine = swappables[next_index]
         _LOGGER.debug(
@@ -297,13 +295,13 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
         if self.current_playing != "routine":
             _LOGGER.debug("pause_routine ignored, no routine playing")
             return
-        if self.paused:
+        if self.is_paused:
             return
         _LOGGER.debug("Pausing routine")
         self._update({"current": {"paused": True}})
 
     def resume_routine(self):
-        if not self.paused:
+        if not self.is_paused:
             return
         _LOGGER.debug("Resuming routine")
         self._update({"current": {"paused": False}})

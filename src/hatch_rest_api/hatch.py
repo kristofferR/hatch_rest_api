@@ -289,13 +289,11 @@ class Hatch:
         response_json = await response.json()
         payload = response_json["payload"]
         item = payload.get("item") if isinstance(payload, dict) else None
-        if item:
-            return item
 
         if (
             isinstance(payload, dict)
-            and payload.get("confirmDataVersion")
-            and payload.get("dataVersion")
+            and payload.get("confirmDataVersion") is not None
+            and payload.get("dataVersion") is not None
         ):
             try:
                 confirmed = await self.confirm_data_version(

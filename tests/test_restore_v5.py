@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 from hatch_rest_api.restore_v5 import RestoreV5
@@ -12,7 +13,7 @@ class FakeRestoreV5(RestoreV5):
         self.current_playing = "none"
         self.current_id = 0
         self.current_step = 0
-        self.paused = False
+        self.is_paused = False
         self.is_snoozed = False
         self.favorites: list[dict] = []
         self.device_name = "Fake Restore"
@@ -59,7 +60,7 @@ class RestoreV5RoutineControlTest(unittest.TestCase):
     def test_pause_routine_is_noop_when_already_paused(self):
         device = FakeRestoreV5()
         device.current_playing = "routine"
-        device.paused = True
+        device.is_paused = True
 
         device.pause_routine()
 
@@ -68,7 +69,7 @@ class RestoreV5RoutineControlTest(unittest.TestCase):
     def test_resume_routine_writes_paused_false_when_paused(self):
         device = FakeRestoreV5()
         device.current_playing = "routine"
-        device.paused = True
+        device.is_paused = True
 
         device.resume_routine()
 
@@ -77,7 +78,7 @@ class RestoreV5RoutineControlTest(unittest.TestCase):
     def test_resume_routine_is_noop_when_not_paused(self):
         device = FakeRestoreV5()
         device.current_playing = "routine"
-        device.paused = False
+        device.is_paused = False
 
         device.resume_routine()
 
@@ -92,14 +93,7 @@ class RestoreV5RoutineControlTest(unittest.TestCase):
         update = device._updates[0]
         self.assertIn("snooze", update)
         self.assertEqual(update["snooze"]["active"], True)
-        # startTime is "YYYY-MM-DD HH:MM:SS" — 19 chars
-        start_time = update["snooze"]["startTime"]
-        self.assertEqual(len(start_time), 19)
-        self.assertEqual(start_time[4], "-")
-        self.assertEqual(start_time[7], "-")
-        self.assertEqual(start_time[10], " ")
-        self.assertEqual(start_time[13], ":")
-        self.assertEqual(start_time[16], ":")
+        datetime.strptime(update["snooze"]["startTime"], "%Y-%m-%d %H:%M:%S")
 
 
 class RestoreV5AdvanceStepTest(unittest.TestCase):
@@ -141,7 +135,7 @@ class RestoreV5AdvanceStepTest(unittest.TestCase):
 
     def test_advance_step_noop_when_paused(self):
         device = self._device_with_routine(steps=3, current_step=0)
-        device.paused = True
+        device.is_paused = True
 
         device.advance_step()
 
