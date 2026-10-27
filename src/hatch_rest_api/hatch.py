@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Iterable
-from datetime import time
+from datetime import datetime, time, tzinfo
 from typing import Any
 
 from aiohttp import ClientError, ClientResponse, ClientSession, __version__
@@ -194,11 +194,15 @@ class Hatch:
         mac: str,
         alarm: ScheduledRoutineAlarm,
         enabled: bool,
+        device_timezone: tzinfo | None = None,
     ) -> list[ScheduledRoutineAlarm]:
+        """Toggle an alarm using the device timezone, or host local time if omitted."""
         return await self._edit_and_confirm_alarm_routines(
             auth_token=auth_token,
             mac=mac,
-            mutable_scheduled_routines=[alarm_update_payload(alarm, enabled)],
+            mutable_scheduled_routines=[
+                alarm_update_payload(alarm, enabled, now=datetime.now(device_timezone))
+            ],
         )
 
     async def update_scheduled_routine_alarm_wake_time(
@@ -207,12 +211,16 @@ class Hatch:
         mac: str,
         alarm: ScheduledRoutineAlarm,
         wake_time: time,
+        device_timezone: tzinfo | None = None,
     ) -> list[ScheduledRoutineAlarm]:
+        """Set device-local wake time; supply its timezone for one-time alarms."""
         return await self._edit_and_confirm_alarm_routines(
             auth_token=auth_token,
             mac=mac,
             mutable_scheduled_routines=[
-                alarm_wake_time_update_payload(alarm, wake_time)
+                alarm_wake_time_update_payload(
+                    alarm, wake_time, now=datetime.now(device_timezone)
+                )
             ],
         )
 
@@ -222,12 +230,16 @@ class Hatch:
         mac: str,
         alarm: ScheduledRoutineAlarm,
         weekdays: Iterable[str],
+        device_timezone: tzinfo | None = None,
     ) -> list[ScheduledRoutineAlarm]:
+        """Set weekdays; supply the device timezone when making an alarm one-time."""
         return await self._edit_and_confirm_alarm_routines(
             auth_token=auth_token,
             mac=mac,
             mutable_scheduled_routines=[
-                alarm_weekdays_update_payload(alarm, weekdays)
+                alarm_weekdays_update_payload(
+                    alarm, weekdays, now=datetime.now(device_timezone)
+                )
             ],
         )
 

@@ -41,6 +41,8 @@ class RestoreIot(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
 
     def _update_local_state(self, state):
         _LOGGER.debug(f"update local state: {self.device_name}, {state}")
+        if safely_get_json_value(state, "timezone") is not None:
+            self.timezone = safely_get_json_value(state, "timezone")
         if safely_get_json_value(state, "deviceInfo.f") is not None:
             self.firmware_version = safely_get_json_value(state, "deviceInfo.f")
 

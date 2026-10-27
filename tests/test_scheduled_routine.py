@@ -1,9 +1,14 @@
 import unittest
-from datetime import datetime, time
+from datetime import UTC, datetime, time, tzinfo
+from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
 from aiohttp import ClientError
 
 from hatch_rest_api.hatch import Hatch
+from hatch_rest_api.restore_iot import RestoreIot
+from hatch_rest_api.restore_v4 import RestoreV4
+from hatch_rest_api.restore_v5 import RestoreV5
 from hatch_rest_api.scheduled_routine import (
     SCHEDULED_ROUTINE_ALARM_PRODUCTS,
     ScheduledRoutineAlarmMixin,
@@ -123,6 +128,7 @@ class EmptyAlarmUpdateApi:
         mac: str,
         alarm: dict,
         enabled: bool,
+        device_timezone: tzinfo | None = None,
     ):
         self.calls.append((auth_token, mac, alarm["id"], enabled))
         return []
@@ -133,6 +139,7 @@ class EmptyAlarmUpdateApi:
         mac: str,
         alarm: dict,
         weekdays,
+        device_timezone: tzinfo | None = None,
     ):
         self.calls.append((auth_token, mac, alarm["id"], list(weekdays)))
         return []
@@ -143,6 +150,7 @@ class EmptyAlarmUpdateApi:
         mac: str,
         alarm: dict,
         wake_time: time,
+        device_timezone: tzinfo | None = None,
     ):
         self.calls.append((auth_token, mac, alarm["id"], wake_time))
         return []
@@ -486,6 +494,42 @@ class ScheduledRoutineAlarmTest(unittest.TestCase):
 
 
 class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
+    async def test_one_time_updates_use_device_local_date_and_time(self):
+        for zone, instant, expected_date in (
+            ("America/New_York", datetime(2026, 5, 8, 10, tzinfo=UTC), "2026-05-08"),
+            ("Asia/Tokyo", datetime(2026, 5, 8, 0, 30, tzinfo=UTC), "2026-05-09"),
+            ("America/New_York", datetime(2026, 3, 8, 10, tzinfo=UTC), "2026-03-08"),
+        ):
+            for operation in ("enabled", "wake_time", "weekdays"):
+                with self.subTest(zone=zone, instant=instant, operation=operation):
+                    session = FakeSession()
+                    api = Hatch(client_session=session)
+                    kwargs = {
+                        "auth_token": "token",
+                        "mac": "AA:BB:CC",
+                        "alarm": {
+                            "id": 2,
+                            "enabled": True,
+                            "startTime": "2000-01-01T07:00:00",
+                            "endTime": "2000-01-01T07:30:00",
+                            "daysOfWeek": 62 if operation == "weekdays" else 0,
+                        },
+                        "device_timezone": ZoneInfo(zone),
+                    }
+                    with patch("hatch_rest_api.hatch.datetime", wraps=datetime) as clock:
+                        clock.now.side_effect = lambda tz=None: (
+                            instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+                        )
+                        if operation == "enabled":
+                            await api.update_scheduled_routine_alarm_enabled(**kwargs, enabled=True)
+                        elif operation == "wake_time":
+                            await api.update_scheduled_routine_alarm_wake_time(**kwargs, wake_time=time(7, 30))
+                        else:
+                            await api.update_scheduled_routine_alarm_weekdays(**kwargs, weekdays=[])
+
+                    self.assertEqual(session.last_mrds[0]["startTime"], f"{expected_date}T07:00:00")
+                    self.assertEqual(session.last_mrds[0]["endTime"], f"{expected_date}T07:30:00")
+
     async def test_confirm_failure_refetches_authoritative_alarms(self):
         session = FakeSession(fail_confirm=True)
         api = Hatch(client_session=session)
@@ -696,6 +740,43 @@ class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ScheduledRoutineAlarmMixinTest(unittest.IsolatedAsyncioTestCase):
+    async def test_device_shadow_timezone_reaches_alarm_updates_and_fallbacks(self):
+        instant = datetime(2026, 5, 8, 10, tzinfo=UTC)
+        for device_type in (RestoreIot, RestoreV4, RestoreV5):
+            for fallback in (False, True):
+                for operation in ("enabled", "wake_time", "weekdays"):
+                    with self.subTest(device=device_type, fallback=fallback, operation=operation):
+                        session = FakeSession()
+                        api = EmptyAlarmUpdateApi() if fallback else Hatch(client_session=session)
+                        device = object.__new__(device_type)
+                        device.mac = "AA:BB:CC"
+                        device.device_name = "Restore"
+                        device.thing_name = "restore"
+                        device.publish_updates = Mock()
+                        device.configure_alarm_api(api=api, auth_token="token", alarms=[{
+                            "id": 2,
+                            "enabled": True,
+                            "startTime": "2000-01-01T07:00:00",
+                            "endTime": "2000-01-01T07:30:00",
+                            "daysOfWeek": 62 if operation == "weekdays" else 0,
+                        }])
+                        device._update_local_state({"timezone": "America/New_York"})
+                        device._update_local_state({"connected": True})
+                        clock_path = "scheduled_routine" if fallback else "hatch"
+                        with patch(f"hatch_rest_api.{clock_path}.datetime", wraps=datetime) as clock:
+                            clock.now.side_effect = lambda tz=None: (
+                                instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+                            )
+                            if operation == "enabled":
+                                await device.set_alarm_enabled(2, True)
+                            elif operation == "wake_time":
+                                await device.set_alarm_wake_time(2, time(7, 30))
+                            else:
+                                await device.set_alarm_weekdays(2, [])
+
+                        self.assertEqual(device.alarms[0]["startTime"], "2026-05-08T07:00:00")
+                        self.assertEqual(device.alarms[0]["endTime"], "2026-05-08T07:30:00")
+
     async def test_partial_update_preserves_cached_alarm_fields(self):
         device = FakeAlarmDevice()
         alarm = {

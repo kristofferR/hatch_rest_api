@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from .hatch import Hatch
@@ -357,6 +358,7 @@ def _format_like_original(original: str | None, value: datetime) -> str:
 
 class ScheduledRoutineAlarmMixin:
     alarms: list[ScheduledRoutineAlarm]
+    timezone: str | None = None
     alarm_capable: bool = False
     alarms_loaded: bool = False
     _alarm_api: "Hatch | None" = None
@@ -405,17 +407,24 @@ class ScheduledRoutineAlarmMixin:
             raise ValueError(f"Alarm {alarm_id} not found for {self.device_name}")
 
         api, auth_token = self._configured_alarm_api()
+        device_timezone = ZoneInfo(self.timezone) if self.timezone else None
         updated_alarms = await api.update_scheduled_routine_alarm_enabled(
             auth_token=auth_token,
             mac=self.mac,
             alarm=alarm,
             enabled=enabled,
+            device_timezone=device_timezone,
         )
         if updated_alarms:
             self._replace_alarms(updated_alarms)
         else:
             self._replace_alarms(
-                [{**alarm, **alarm_update_payload(alarm, enabled)}]
+                [{
+                    **alarm,
+                    **alarm_update_payload(
+                        alarm, enabled, now=datetime.now(device_timezone)
+                    ),
+                }]
             )
         self.publish_updates()
 
@@ -428,17 +437,24 @@ class ScheduledRoutineAlarmMixin:
             raise ValueError(f"Alarm {alarm_id} not found for {self.device_name}")
 
         api, auth_token = self._configured_alarm_api()
+        device_timezone = ZoneInfo(self.timezone) if self.timezone else None
         updated_alarms = await api.update_scheduled_routine_alarm_wake_time(
             auth_token=auth_token,
             mac=self.mac,
             alarm=alarm,
             wake_time=wake_time,
+            device_timezone=device_timezone,
         )
         if updated_alarms:
             self._replace_alarms(updated_alarms)
         else:
             self._replace_alarms(
-                [{**alarm, **alarm_wake_time_update_payload(alarm, wake_time)}]
+                [{
+                    **alarm,
+                    **alarm_wake_time_update_payload(
+                        alarm, wake_time, now=datetime.now(device_timezone)
+                    ),
+                }]
             )
         self.publish_updates()
 
@@ -458,17 +474,24 @@ class ScheduledRoutineAlarmMixin:
         # even if the caller passed a single-pass generator.
         weekdays_list = [weekdays] if isinstance(weekdays, str) else list(weekdays)
         api, auth_token = self._configured_alarm_api()
+        device_timezone = ZoneInfo(self.timezone) if self.timezone else None
         updated_alarms = await api.update_scheduled_routine_alarm_weekdays(
             auth_token=auth_token,
             mac=self.mac,
             alarm=alarm,
             weekdays=weekdays_list,
+            device_timezone=device_timezone,
         )
         if updated_alarms:
             self._replace_alarms(updated_alarms)
         else:
             self._replace_alarms(
-                [{**alarm, **alarm_weekdays_update_payload(alarm, weekdays_list)}]
+                [{
+                    **alarm,
+                    **alarm_weekdays_update_payload(
+                        alarm, weekdays_list, now=datetime.now(device_timezone)
+                    ),
+                }]
             )
         self.publish_updates()
 
