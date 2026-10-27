@@ -1,6 +1,8 @@
 import unittest
 from datetime import datetime, time
 
+from aiohttp import ClientError
+
 from hatch_rest_api.hatch import Hatch
 from hatch_rest_api.scheduled_routine import (
     SCHEDULED_ROUTINE_ALARM_PRODUCTS,
@@ -30,12 +32,16 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self):
+    def __init__(self, fail_confirm=False, fail_fetch=False):
         self.calls = []
         self.last_mrds = []
+        self.fail_confirm = fail_confirm
+        self.fail_fetch = fail_fetch
 
     async def get(self, url: str, headers: dict, params: dict):
         self.calls.append(("GET", url, headers, params))
+        if self.fail_fetch:
+            raise ClientError("fetch failed")
         return FakeResponse(
             url,
             {
@@ -56,6 +62,8 @@ class FakeSession:
 
     async def post(self, url: str, json: dict, headers: dict):
         self.calls.append(("POST", url, headers, json))
+        if self.fail_confirm and url.endswith("/service/app/v2/dataVersion"):
+            raise ClientError("confirm failed")
         if url.endswith("/service/app/routine/v2/editMultiple"):
             self.last_mrds = json["mrds"]
             item = {
@@ -129,6 +137,16 @@ class EmptyAlarmUpdateApi:
         self.calls.append((auth_token, mac, alarm["id"], list(weekdays)))
         return []
 
+    async def update_scheduled_routine_alarm_wake_time(
+        self,
+        auth_token: str,
+        mac: str,
+        alarm: dict,
+        wake_time: time,
+    ):
+        self.calls.append((auth_token, mac, alarm["id"], wake_time))
+        return []
+
 
 class RefreshAlarmApi:
     def __init__(self, alarms: list[dict]):
@@ -157,6 +175,28 @@ class FakeAlarmDevice(ScheduledRoutineAlarmMixin):
 
 
 class ScheduledRoutineAlarmTest(unittest.TestCase):
+    def test_clearing_weekdays_rolls_only_enabled_alarms(self):
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                alarm = {
+                    "id": 2,
+                    "enabled": enabled,
+                    "startTime": "2000-01-01T07:00:00",
+                    "endTime": "2000-01-01T07:30:00",
+                    "daysOfWeek": 62,
+                }
+
+                payload = alarm_weekdays_update_payload(
+                    alarm, [], now=datetime(2026, 5, 8, 8, 0, 0)
+                )
+
+                expected_date = "2026-05-09" if enabled else "2000-01-01"
+                self.assertEqual(payload["daysOfWeek"], 0)
+                self.assertIs(payload["enabled"], enabled)
+                self.assertEqual(payload["startTime"], f"{expected_date}T07:00:00")
+                self.assertEqual(payload["endTime"], f"{expected_date}T07:30:00")
+                self.assertEqual(alarm["daysOfWeek"], 62)
+
     def test_alarm_products_include_all_restore_generations(self):
         self.assertEqual(
             SCHEDULED_ROUTINE_ALARM_PRODUCTS,
@@ -254,7 +294,9 @@ class ScheduledRoutineAlarmTest(unittest.TestCase):
             "daysOfWeek": 127,
         }
 
-        payload = alarm_weekdays_update_payload(alarm, [])
+        payload = alarm_weekdays_update_payload(
+            alarm, [], now=datetime(2026, 5, 8, 7, 0, 0)
+        )
 
         self.assertEqual(payload["daysOfWeek"], 0)
         self.assertIs(payload["enabled"], True)
@@ -444,6 +486,47 @@ class ScheduledRoutineAlarmTest(unittest.TestCase):
 
 
 class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
+    async def test_confirm_failure_refetches_authoritative_alarms(self):
+        session = FakeSession(fail_confirm=True)
+        api = Hatch(client_session=session)
+
+        with self.assertLogs("hatch_rest_api.hatch", level="WARNING"):
+            updated = await api.update_scheduled_routine_alarm_enabled(
+                auth_token="token",
+                mac="AA:BB:CC",
+                alarm={"id": 2},
+                enabled=False,
+            )
+
+        self.assertIs(updated[0]["enabled"], True)
+        self.assertEqual(
+            [(method, url.rsplit("/", 1)[-1]) for method, url, _, _ in session.calls],
+            [("POST", "editMultiple"), ("POST", "dataVersion"), ("GET", "fetch")],
+        )
+        self.assertEqual(session.calls[-1][3], {
+            "macAddress": "AA:BB:CC", "types": ["alarm"],
+        })
+
+    async def test_confirm_failure_propagates_refetch_failure(self):
+        session = FakeSession(fail_confirm=True, fail_fetch=True)
+        api = Hatch(client_session=session)
+
+        with (
+            self.assertLogs("hatch_rest_api.hatch", level="WARNING"),
+            self.assertRaisesRegex(ClientError, "fetch failed"),
+        ):
+            await api.update_scheduled_routine_alarm_enabled(
+                auth_token="token",
+                mac="AA:BB:CC",
+                alarm={"id": 2},
+                enabled=False,
+            )
+
+        self.assertEqual(
+            [(method, url.rsplit("/", 1)[-1]) for method, url, _, _ in session.calls],
+            [("POST", "editMultiple"), ("POST", "dataVersion"), ("GET", "fetch")],
+        )
+
     async def test_scheduled_routine_fetch_uses_v3_alarm_query(self):
         session = FakeSession()
         api = Hatch(client_session=session)
@@ -613,6 +696,75 @@ class HatchScheduledRoutineApiTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ScheduledRoutineAlarmMixinTest(unittest.IsolatedAsyncioTestCase):
+    async def test_partial_update_preserves_cached_alarm_fields(self):
+        device = FakeAlarmDevice()
+        alarm = {
+            "id": 2,
+            "name": "Wake",
+            "active": True,
+            "enabled": True,
+            "type": "alarm",
+            "macAddress": "AA:BB:CC",
+            "startTime": "2000-01-01T07:00:00",
+            "endTime": "2000-01-01T07:30:00",
+            "daysOfWeek": 62,
+            "steps": [{"name": "Sunrise", "color": {"duration": 1800}}],
+        }
+        other_alarm = {"id": 3, "name": "Other"}
+        device.configure_alarm_api(
+            api=Hatch(client_session=FakeSession()),
+            auth_token="token",
+            alarms=[alarm, other_alarm],
+        )
+
+        await device.set_alarm_enabled(2, False)
+        await device.set_alarm_enabled(2, True)
+
+        self.assertEqual(device.alarms, [alarm, other_alarm])
+        self.assertEqual(device.publish_count, 2)
+        device._replace_alarms([{"id": 2, "name": "Updated"}, {"id": 4}])
+        self.assertEqual(device.alarms, [{**alarm, "name": "Updated"}, other_alarm, {"id": 4}])
+
+    async def test_set_alarm_wake_time_fallback_preserves_alarm_state(self):
+        api = EmptyAlarmUpdateApi()
+        device = FakeAlarmDevice()
+        alarm = {
+            "id": 2,
+            "enabled": True,
+            "startTime": "2000-01-01T07:00:00",
+            "endTime": "2000-01-01T07:30:00",
+            "daysOfWeek": 0,
+        }
+        other_alarm = {"id": 3, "name": "Other"}
+        device.configure_alarm_api(api=api, auth_token="token", alarms=[alarm, other_alarm])
+        before_update = datetime.now()
+
+        await device.set_alarm_wake_time(2, time(8, 15))
+
+        self.assertEqual(api.calls, [("token", "AA:BB:CC", 2, time(8, 15))])
+        self.assertEqual(device.publish_count, 1)
+        self.assertEqual(device.alarms[1], other_alarm)
+        updated = device.alarms[0]
+        self.assertEqual(updated["id"], 2)
+        self.assertEqual(updated["daysOfWeek"], 0)
+        self.assertIs(updated["enabled"], True)
+        start = datetime.fromisoformat(updated["startTime"])
+        end = datetime.fromisoformat(updated["endTime"])
+        self.assertGreater(end, before_update)
+        self.assertEqual(end.time(), time(8, 15))
+        self.assertEqual((end - start).total_seconds(), 1800)
+
+    async def test_set_alarm_weekdays_accepts_single_string(self):
+        api = EmptyAlarmUpdateApi()
+        device = FakeAlarmDevice()
+        device.configure_alarm_api(api=api, auth_token="token", alarms=[{"id": 2}])
+
+        await device.set_alarm_weekdays(2, "monday")
+
+        self.assertEqual(api.calls, [("token", "AA:BB:CC", 2, ["monday"])])
+        self.assertEqual(device.alarms[0]["daysOfWeek"], 2)
+        self.assertEqual(device.publish_count, 1)
+
     async def test_failed_initial_fetch_remains_alarm_capable_for_refresh(self):
         api = RefreshAlarmApi(
             [

@@ -125,9 +125,16 @@ def alarm_wake_time_update_payload(
 def alarm_weekdays_update_payload(
     alarm: ScheduledRoutineAlarm,
     weekdays: Iterable[str],
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     if "id" not in alarm:
         raise ValueError("Cannot update alarm without an id")
+
+    days_of_week = weekdays_to_days_of_week(weekdays)
+    start_time = alarm.get("startTime")
+    end_time = alarm.get("endTime")
+    if days_of_week == 0 and alarm.get("enabled"):
+        start_time, end_time = _next_one_time_alarm_times(alarm, now=now)
 
     return {
         "id": alarm["id"],
@@ -135,9 +142,9 @@ def alarm_weekdays_update_payload(
         "active": alarm.get("active"),
         "enabled": alarm.get("enabled"),
         "displayOrder": alarm.get("displayOrder"),
-        "startTime": alarm.get("startTime"),
-        "endTime": alarm.get("endTime"),
-        "daysOfWeek": weekdays_to_days_of_week(weekdays),
+        "startTime": start_time,
+        "endTime": end_time,
+        "daysOfWeek": days_of_week,
     }
 
 
@@ -449,7 +456,7 @@ class ScheduledRoutineAlarmMixin:
 
         # Materialize once so the API call and the fallback payload see the same values
         # even if the caller passed a single-pass generator.
-        weekdays_list = list(weekdays)
+        weekdays_list = [weekdays] if isinstance(weekdays, str) else list(weekdays)
         api, auth_token = self._configured_alarm_api()
         updated_alarms = await api.update_scheduled_routine_alarm_weekdays(
             auth_token=auth_token,
@@ -480,7 +487,7 @@ class ScheduledRoutineAlarmMixin:
             if alarm.get("id") is not None
         }
         merged = [
-            by_id.get(str(alarm.get("id")), alarm)
+            {**alarm, **by_id.get(str(alarm.get("id")), {})}
             for alarm in getattr(self, "alarms", [])
         ]
         existing_ids = {str(alarm.get("id")) for alarm in merged}
