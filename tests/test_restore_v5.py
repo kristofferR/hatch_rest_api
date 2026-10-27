@@ -238,6 +238,38 @@ class RestoreV5SwapRoutineTest(unittest.TestCase):
         active_ids = [f["id"] for f in device.favorites if f.get("active")]
         self.assertEqual(active_ids, [10])
 
+    def test_swap_routine_cycles_distinct_ids_with_duplicate_favorites(self):
+        device = self._device_with_swappables()
+        device.favorites += [dict(r) for r in device.favorites]
+        api = AsyncMock()
+        api.bulk_edit_swappables = AsyncMock(return_value=[])
+        device._alarm_api = api
+
+        self.assertEqual([r["id"] for r in device.swappable_routines], [10, 20, 30])
+        for current_id, next_id in ((10, 20), (20, 30), (30, 10)):
+            asyncio.run(device.swap_routine())
+
+            routines = api.bulk_edit_swappables.await_args.kwargs["routines"]
+            self.assertEqual(
+                [(r["id"], r["active"]) for r in routines],
+                [(current_id, False), (next_id, True)],
+            )
+            self.assertEqual(
+                [f["id"] for f in device.favorites if f.get("active")],
+                [next_id, next_id],
+            )
+
+    def test_swap_routine_noop_with_duplicate_copies_of_one_routine(self):
+        device = self._device_with_swappables()
+        device.favorites = [device.favorites[0], dict(device.favorites[0])]
+        api = AsyncMock()
+        device._alarm_api = api
+
+        self.assertFalse(device.can_swap_routine)
+        asyncio.run(device.swap_routine())
+
+        api.bulk_edit_swappables.assert_not_called()
+
     def test_swap_routine_noop_when_only_one_swappable(self):
         device = self._device_with_swappables()
         device.favorites = [device.favorites[0]]

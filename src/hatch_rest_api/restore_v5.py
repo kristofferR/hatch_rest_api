@@ -216,11 +216,12 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
 
     @property
     def swappable_routines(self) -> list[dict]:
+        routines_by_id = {
+            f["id"]: f for f in self.favorites
+            if f.get("button0") and f.get("type") == "routine"
+        }
         return sorted(
-            (
-                f for f in self.favorites
-                if f.get("button0") and f.get("type") == "routine"
-            ),
+            routines_by_id.values(),
             key=lambda r: (r.get("displayOrder") if r.get("displayOrder") is not None else float("inf")),
         )
 
