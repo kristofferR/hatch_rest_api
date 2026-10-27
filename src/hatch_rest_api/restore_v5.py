@@ -212,7 +212,7 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
 
     @property
     def can_advance_step(self) -> bool:
-        return self.current_step + 1 < self.routine_step_count
+        return self.current_step + 1 <= self.routine_step_count
 
     @property
     def swappable_routines(self) -> list[dict]:
@@ -240,8 +240,8 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
             _LOGGER.debug("advance_step ignored, no step data for current routine")
             return
         next_step = self.current_step + 1
-        if next_step >= steps_count:
-            _LOGGER.debug(f"advance_step ignored, already at last step {self.current_step}/{steps_count - 1}")
+        if next_step > steps_count:
+            _LOGGER.debug(f"advance_step ignored, already at last step {self.current_step}/{steps_count}")
             return
         _LOGGER.debug(f"Advancing routine to step {next_step}")
         self._update({"current": {"step": next_step}})
@@ -301,7 +301,7 @@ class RestoreV5(ScheduledRoutineAlarmMixin, ShadowClientSubscriberMixin):
         self._update({"current": {"paused": True}})
 
     def resume_routine(self):
-        if not self.is_paused:
+        if self.current_playing != "routine" or not self.is_paused:
             return
         _LOGGER.debug("Resuming routine")
         self._update({"current": {"paused": False}})

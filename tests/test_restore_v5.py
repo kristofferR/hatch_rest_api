@@ -84,6 +84,17 @@ class RestoreV5RoutineControlTest(unittest.TestCase):
 
         self.assertEqual(device._updates, [])
 
+    def test_resume_routine_is_noop_when_paused_state_outlives_routine(self):
+        for playing in ("none", "remote"):
+            with self.subTest(playing=playing):
+                device = FakeRestoreV5()
+                device.current_playing = playing
+                device.is_paused = True
+
+                device.resume_routine()
+
+                self.assertEqual(device._updates, [])
+
     def test_snooze_alarm_writes_active_true_with_start_time(self):
         device = FakeRestoreV5()
 
@@ -118,8 +129,15 @@ class RestoreV5AdvanceStepTest(unittest.TestCase):
 
         self.assertEqual(device._updates, [{"current": {"step": 2}}])
 
-    def test_advance_step_noop_when_at_last_step(self):
+    def test_advance_step_can_reach_last_step(self):
         device = self._device_with_routine(steps=3, current_step=2)
+
+        device.advance_step()
+
+        self.assertEqual(device._updates, [{"current": {"step": 3}}])
+
+    def test_advance_step_noop_when_at_last_step(self):
+        device = self._device_with_routine(steps=3, current_step=3)
 
         device.advance_step()
 
@@ -152,6 +170,8 @@ class RestoreV5AdvanceStepTest(unittest.TestCase):
         device = self._device_with_routine(steps=3, current_step=0)
         self.assertTrue(device.can_advance_step)
         device.current_step = 2
+        self.assertTrue(device.can_advance_step)
+        device.current_step = 3
         self.assertFalse(device.can_advance_step)
 
 
